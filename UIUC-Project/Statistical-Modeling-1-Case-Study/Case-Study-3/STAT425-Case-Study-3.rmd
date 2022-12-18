@@ -1,0 +1,187 @@
+---
+title: "STAT425-CS3 Final Project"
+author: 'Net ID: juiyul2, ksfan2, wanchai2, idalvi2'
+date: "2022-12-06"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Import Data**
+```{r read data}
+library(tidyverse)
+bubble <- read.csv("bubblewrap.csv")
+#remove observations that bubble wrap was not acceptable
+bubble <- bubble %>% filter(!(replication==2 & (run_order%in% c(2, 3, 5))))
+dim(bubble)
+bubble$line_speed <- as.factor(bubble$line_speed)
+bubble$loading <- as.factor(bubble$loading)
+head(bubble)
+```
+We import data and remove 3 observations that the quality of the bubble wrap was not acceptable.
+
+**Run Two-Way ANOVA & Interaction Plot**
+```{r two way anova model}
+full_model <- lm(rate ~ loading*line_speed, bubble)
+summary(full_model)
+interaction.plot(bubble$loading, bubble$line_speed, bubble$rate)
+```
+
+According to the interaction plot, it seems that there is interaction effect because there are intersection between lines.
+
+**Testing for interaction term**
+```{r Anova Type III}
+library(car)
+Anova(full_model, type="III")
+add_model <- lm(rate ~ loading+line_speed, bubble)
+anova(add_model, full_model)
+```
+According to Anova Type III and partial F-Test (which gives the same result for testing interaction term), since the p-value for interaction term is 0.6426 which is less than 0.05, interaction term is not significant and can be removed.
+
+**Testing for line_speed**
+```{r reduce  model}
+reduce_model <- lm(rate ~ loading, bubble)
+summary(reduce_model)
+anova(reduce_model, add_model)
+```
+According to the partial F-Test, the p-value is 0.1002. It means reduced model is better and line_speed can be removed.
+
+**Testing for loading**
+```{r null model}
+null.model = lm(rate ~ 1, bubble)
+anova(null.model, reduce_model)
+```
+According to the partial F-Test, the p-value is 0.006146 which is less than 0.05. Thus, we reject the null model and keep "loading".
+
+
+**Normality and Constant Variance Assumption Check**
+```{r normality check}
+par(mfrow=c(1,2))
+qqnorm(reduce_model$res)
+plot(reduce_model$fitted, reduce_model$res, xlab="Fitted", ylab="Residuals")
+shapiro.test(reduce_model$residuals)
+summary(lm(abs(reduce_model$res)~loading, bubble))
+```
+The Q-Q plot shows that normality is not too bad and normality assumption is satisfied due to Shapiro-Wilk test.
+But the residual plot and Levene's test show that the constant variance assumption is not satisfied. We will try remedial measures to fix constant variance assumption.
+
+**WLS weighted by loading variable**
+```{r WLS}
+bubble <- bubble %>% group_by(loading) %>% mutate(weight = 1/var(rate))
+
+WLS_model <- lm(rate ~ loading, bubble, weights=weight)
+summary(WLS_model)
+
+
+par(mfrow=c(1,2))
+qqnorm(WLS_model$res)
+plot(WLS_model$fitted, WLS_model$res, xlab="Fitted", ylab="Residuals")
+shapiro.test(WLS_model$residuals)
+summary(lm(abs(WLS_model$res)~loading, bubble))
+```
+Normality assumption remains satisfied but constant variance assumption is still not satisfied based on Levene's test.
+
+**Relation between residual and loading**
+```{r relation}
+plot(abs(reduce_model$residuals) ~ bubble$loading)
+plot(reduce_model$residuals^2 ~ bubble$loading)
+```
+
+It looks like there are differences of absolute residual and square of residual among loading level. Thus, we try to use estimated standard deviation and variance functions to do WLS.
+
+**Standard Deviation Function**
+```{r sd function}
+lm.resid = lm(abs(reduce_model$residuals) ~ bubble$loading)
+summary(lm.resid)
+
+bubble$weight_sd_fn = 1/lm.resid$fitted.values^2
+```
+Rejecting $H_0$ of F-test means "loading" is significant in the S.D. function.
+
+**WLS S.D. Function**
+```{r WLS sd}
+WLS_model_SD <- lm(rate ~ loading, bubble, weights=weight_sd_fn)
+summary(WLS_model_SD)
+
+
+par(mfrow=c(1,2))
+qqnorm(WLS_model_SD$res)
+plot(WLS_model_SD$fitted, WLS_model_SD$res, xlab="Fitted", ylab="Residuals")
+shapiro.test(WLS_model_SD$residuals)
+summary(lm(abs(WLS_model_SD$res)~loading, bubble))
+```
+Normality assumption remains satisfied but constant variance assumption is still not satisfied based on Levene's test.
+
+**Variance Function**
+```{r variance function}
+lm.var = lm(reduce_model$residuals^2 ~ bubble$loading)
+summary(lm.var)
+
+bubble$weight_var_fn = 1/lm.var$fitted.values
+```
+Rejecting $H_0$ of F-test means "loading" is significant in the variance function.
+
+**WLS Var Function**
+```{r WLS variance}
+WLS_model_var <- lm(rate ~ loading, bubble, weights=weight_var_fn)
+summary(WLS_model_var)
+
+
+par(mfrow=c(1,2))
+qqnorm(WLS_model_var$res)
+plot(WLS_model_var$fitted, WLS_model_var$res, xlab="Fitted", ylab="Residuals")
+shapiro.test(WLS_model_var$residuals)
+summary(lm(abs(WLS_model_var$res)~loading, bubble))
+```
+Normality assumption remains satisfied but constant variance assumption is still not satisfied based on Levene's test.
+
+We observe that all WLS methods we tried with One-Way Anova does not help to fixed the constant variance assumption. Then, we decide to do WLS with weight based on both loading and line_speed and hope that line_speed helps stabilize our model.
+
+**WLS Two-Way ANOVA**
+```{r wls two way}
+bubble <- bubble %>% group_by(loading, line_speed) %>% mutate(weight2var = 1/var(rate))
+
+WLS_model2 <- lm(rate ~ loading+line_speed, bubble, weights=weight2var)
+summary(WLS_model2)
+
+
+par(mfrow=c(1,2))
+qqnorm(WLS_model2$res)
+plot(WLS_model2$fitted, WLS_model2$res, xlab="Fitted", ylab="Residuals")
+shapiro.test(WLS_model2$residuals)
+summary(lm(abs(WLS_model2$res)~loading+line_speed, bubble))
+```
+As we included the line_speed in another wls model, constant variance assumption is a lot better according to Levene's test but is still not satisfied. Thus, even line_speed is not significant we decide to include it in our model to help stabilize the model. However, normality assumption is not satisfied in this case. Next, we try to use Box-Cox transformation to solve normality assumption.
+
+**Box-Cox Transformation for Two-Way ANOVA model**
+```{r Box-Cox Two-Way}
+library(MASS)
+boxcox(WLS_model2)
+```
+
+According to the plot, we are trying transformation with lambda = 1.5.
+
+```{r box-cox WLS two way}
+WLS_model3 <- lm(rate^1.5 ~ loading+line_speed, bubble, weights=weight2var)
+summary(WLS_model3)
+
+par(mfrow=c(1,2))
+qqnorm(WLS_model3$res)
+plot(WLS_model3$fitted, WLS_model3$res, xlab="Fitted", ylab="Residuals")
+shapiro.test(WLS_model3$residuals)
+summary(lm(abs(WLS_model3$res)~loading+line_speed, bubble))
+```
+Constant variance and normality assumptions remain unsatisfied. Box-Cox does not help make normality better so we decide not to go with Box-Cox transformation.
+
+
+**Conclusion**
+
+We decide that the optimal model is the one-way ANOVA because every remedial measures we did does not help fixed constant variance assumption. So we chose the most simple model and keep the diagnostics in our minds.
+```{r Tukey}
+TukeyHSD(aov(rate ~ loading, bubble), data=bubble, conf.level=0.95)
+```
+According to Tukey test, loading of additive level 4 significantly yields to higher production rate than level 2. However, level 0 is not statistically different from level 2 and 4. Thus, we do not completely conclude that loading level 4 is an optimal choice. Still, we would suggest the manufacturer to employ percent loading of additives at level 4 because it is statistically better than level 2 and carry out more experiments to know more about level 0.
