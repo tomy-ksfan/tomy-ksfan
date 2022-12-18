@@ -1,0 +1,178 @@
+---
+title: "STAT425-CS2"
+author: 'Net ID: juiyul2, ksfan2, wanchai2, idalvi2'
+date: "2022-12-04"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Import Data**
+```{r read data}
+library(readr)
+crime <- read_table("uscrime.txt")
+full_model_data1 <- crime
+head(full_model_data1)
+```
+**Split the data set in two parts: a training and a testing data set. Choose 30\% of the data at random for testing, and use the remaining for training.**
+
+**Make 'So' as a factor variable because it is a categorical variable and standardize other variables.**
+
+**Using seed = 425 for all analyses.**
+```{r Problem 1 split data}
+library(creditmodel)
+#split data set
+train_test_raw = train_test_split (full_model_data1, prop = 0.7, split_type = "Random",
+                                   seed = 425, save_data = FALSE)
+rawdata_train = train_test_raw$train
+rawdata_test = train_test_raw$test
+
+#Make So as a factor variable and standardize other variables
+rawdata_train=as.data.frame(rawdata_train)
+rawdata_train$So=as.factor(rawdata_train$So)
+rawdata_train[,-2]=scale(rawdata_train[,-2])
+rawdata_test=as.data.frame(rawdata_test)
+rawdata_test$So=as.factor(rawdata_test$So)
+rawdata_test[,-2]=scale(rawdata_test[,-2])
+
+```
+
+**1. Criterion-based approaches: BIC**
+
+```{r Using leaps package for variable selection}
+library(leaps)
+regsubsets_selection=regsubsets(Crime~., data = rawdata_train, nvmax=15)
+rs = summary(regsubsets_selection)
+rs$which
+```
+The table above shows which variables are included in corresponding models.
+
+
+```{r Problem 3 Best model according to BIC}
+n=dim(rawdata_train)[1]
+msize = 1:15
+BIC = n*log(rs$rss/n) + msize*log(n)
+which.min(BIC)
+rs$which[which.min(BIC),]
+
+BICtrain.lr <- lm(Crime~Ed+Po1+Ineq+Time, data=rawdata_train)
+BICtrain_RMSE<-sqrt(mean((rawdata_train$Crime-predict(BICtrain.lr,data=rawdata_train))^2))
+BICtest_RMSE<-sqrt(mean((rawdata_test$Crime-predict(BICtrain.lr,newdata=rawdata_test))^2))
+
+BICtrain_RMSE
+BICtest_RMSE
+```
+The best model based on BIC value is the 4th model. The model includes the variables of Ed, Po1, Ineq and Time. The training and testing RMSE are 0.4600 and 0.7438, respectively.
+
+**2. Principal Components Analysis**
+
+```{r Problem PCR train test rmse}
+#construct So dummy for PCA and ridge prediction
+rawdata_train_so_dummy <- as.data.frame(rawdata_train[,2])
+colnames(rawdata_train_so_dummy) <- c("So")
+rawdata_train_so_dummy$So1 <- ifelse(rawdata_train_so_dummy$So == "1", 1, 0)
+rawdata_train_so_dummy <- rawdata_train_so_dummy[,-1]
+rawdata_test_so_dummy <- as.data.frame(rawdata_test[,2])
+colnames(rawdata_test_so_dummy) <- c("So")
+rawdata_test_so_dummy$So1 <- ifelse(rawdata_test_so_dummy$So == "1", 1, 0)
+rawdata_test_so_dummy <- rawdata_test_so_dummy[,-1]
+
+library(pls)
+#scale=FALSE: data already standardized
+crime.pcr<-pcr(Crime ~ ., scale=FALSE, data=rawdata_train,ncomp=15)
+summary(crime.pcr)
+```
+According to PCR summary table, in order to explain 90% of total data variation, we include the first 6 components.
+
+
+```{r scree plot}
+#scree plot
+plot(prcomp(cbind(as.matrix(rawdata_train[,-c(2,16)]), 
+                  as.matrix(rawdata_train_so_dummy)))$sdev[1:15],
+     ylab="PCAs Std Dev", xlab="PCA number", type="l")
+set.seed(425)
+```
+We could not observe an elbow in Scree plot which means that all components should be included, but it is not helpful for reducing predictors. Thus, we decided not to rely on the Scree plot.
+
+```{r cross validation}
+#Using CV to select the optimal number of PCs to use
+#scale=FALSE: data already standardized
+set.seed(425)
+crime.pcrcv<-pcr(Crime~., scale=FALSE, data=rawdata_train, validation="CV", ncomp=15)
+pcrCV<-RMSEP(crime.pcrcv, estimate="CV")
+plot(pcrCV)
+pcrCV
+which.min(pcrCV$val)
+
+#six components
+pcrtrain5_RMSE <- sqrt(mean((rawdata_train$Crime- 
+                            predict(crime.pcrcv,rawdata_train,
+                                    ncomp=which.min(pcrCV$val)-1))^2))
+pcrtest5_RMSE <- sqrt(mean((rawdata_test$Crime-
+                           predict(crime.pcrcv,rawdata_test,
+                                   ncomp=which.min(pcrCV$val)-1))^2))
+#five components
+pcrtrain6_RMSE <- sqrt(mean((rawdata_train$Crime- 
+                            predict(crime.pcrcv,rawdata_train,ncomp=6))^2))
+pcrtest6_RMSE <- sqrt(mean((rawdata_test$Crime-
+                           predict(crime.pcrcv,rawdata_test,ncomp=6))^2))
+
+#six components model is from PCR summary table in order to explain 90% of total data variation
+pcrtrain6_RMSE
+pcrtest6_RMSE
+
+#five components model is from finding minimum Cross-validation
+pcrtrain5_RMSE
+pcrtest5_RMSE
+```
+The sixth model, which is 5 components with the intercept gives the lowest RMSEP.
+
+As a result we compute RMSE for both 6 and 5 components.
+
+6 components: Training RSME is 0.5380 and testing RMSE is 0.7275
+
+5 components: Training RSME is 0.5415 and testing RMSE is 0.7450
+
+**3. Ridge Regression** 
+
+```{r Problem Ridge regression train test rmse}
+require(MASS)
+
+crime.ridge <- lm.ridge(Crime~., rawdata_train, lambda=seq(0, 10, len=21))
+which.min(crime.ridge$GCV)
+matplot(crime.ridge$lambda, coef(crime.ridge), type="l",
+        xlab=expression(lambda), ylab=expression(hat(beta)), col=1)
+abline(v=4.5)
+
+crime.ridge.train <- cbind(1,as.matrix(rawdata_train[,1]) ,
+                           as.matrix(rawdata_train_so_dummy),
+                           as.matrix(rawdata_train[,-c(1,2,16)]))%*%
+                   coef(crime.ridge)[which.min(crime.ridge$GCV)[[1]],]
+crime.ridge.test <- cbind(1,as.matrix(rawdata_test[,1]) ,
+                          as.matrix(rawdata_test_so_dummy),
+                          as.matrix(rawdata_test[,-c(1,2,16)]))%*%
+                  coef(crime.ridge)[which.min(crime.ridge$GCV)[[1]],]
+ridgetrain_RMSE <- sqrt(mean((rawdata_train$Crime - crime.ridge.train)^2))
+ridgetest_RMSE <- sqrt(mean((rawdata_test$Crime - crime.ridge.test)^2))
+
+ridgetrain_RMSE
+ridgetest_RMSE
+```
+The ridge regression with lambda = 4.5 minimizes the Generalized Cross-Validation and its training RMSE is 0.4316 and testing RMSE is 0.7384.
+
+
+
+
+Methods |Training RMSE| Testing RMSE
+---|---|---
+BIC | 0.4600 | 0.7384
+PCR 6 components | 0.5380 | 0.7275
+PCR 5 components | 0.5415 | 0.7450
+Ridge | 0.4316 | 0.7384
+
+
+According to the table above, We would suggest that the best model is the model from Principal Components Regression with 6 components because it gives us the lowest testing error.
