@@ -17,10 +17,7 @@ Python, R, Matlab
 ## Hobbit
 I love playing table tennis and volleyball.
 
-- 👋 Hi, I’m @tomy-ksfan
-- 👀 I’m interested in data science and statistics
-- 🌱 I’m currently studying in the University of Illinois at Urbana-Champaign
-- 💞️ I’m looking to collaborate on ...
-- 📫 How to reach me ...
+## Contact Information
+Email: tomyksfan@gmail.com / ksfan2@illinois.edu
 
 
