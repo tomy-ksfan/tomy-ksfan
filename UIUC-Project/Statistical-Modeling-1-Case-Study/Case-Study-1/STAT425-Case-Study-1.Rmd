@@ -1,0 +1,476 @@
+---
+title: "Case Study 1"
+author: "Supanut Wanchai, Kai-Shiang Fan, Jui-Yu Lin"
+date: "2022-10-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Preprocess
+### Load Data
+
+We start with loading data from the file of CDI.txt and renaming columns using abbreviation. See abbreviation mapping in PDF file.
+
+```{r load_dataset}
+library(readr)
+CDI <- read_table("CDI.txt", col_names = FALSE, 
+    col_types = cols(X1 = col_character(), 
+        X17 = col_character()))
+colnames(CDI) <- c("ID", "COUNTY", "STATE", "LA", "TP", "P18", "P65", "PHY", "BED", "SC", "HS", "BD", "POV", "UNEM", "CAP_INC", "TOTAL_INC", "REGION")
+head(CDI)
+```
+### Drop Columns and Creating Dummy Variable
+
+We drop ID, COUNTY and STATE columns from data set. We create dummy variables from `REGION`. `RE_NE`, `RE_NC`, and `RE_S` are for NE, NC, and S respectively. And if all these dummy variables are 0, it means `REGION`=W. Finally, we drop `REGION` (the original column).
+
+```{r dummy variable}
+full_model_data <- CDI[,-c(1,2,3)]
+full_model_data$RE_NE <- ifelse(full_model_data$REGION == "1", 1, 0)
+full_model_data$RE_NC <- ifelse(full_model_data$REGION == "2", 1, 0)
+full_model_data$RE_S <- ifelse(full_model_data$REGION == "3", 1, 0)
+full_model_data <- full_model_data[,-c(14)]
+head(full_model_data)
+```
+
+## Correlation Check
+
+We create correlation matrix.
+
+```{r correlatin}
+round(cor(full_model_data),2)
+library(corrplot)
+corrplot(cor(full_model_data), method='number', number.cex=0.5)
+```
+
+Observation: There is high correlation (>0.85) between `Total Population`, `Number of Bed`, `Serious crime`, and `Total personal income`.
+
+To avoid collinearity problems, we decide to drop all these variables but `Number of Bed` because it has the highest correlation to `Number of active physicians`.
+
+## Full Model, Unusual Observations & Assumption Checks
+### Full Model
+
+Our full model is
+\[PHY = \beta_{0,0} + \beta_{0,1}LA + \beta_{0,2}P18 + \beta_{0,3}P65 + \beta_{0,4}BED + \beta_{0,5}HS + \beta_{0,6}BD + \beta_{0,7}POV + \beta_{0,8}UNEM + \beta_{0,9}CAP\_INC + \beta_{0,10}RE\_NE + \beta_{0,11}RE\_NC + \beta_{0,12}RE\_S\]
+
+```{r full_model}
+full_model_data <- full_model_data[,!names(full_model_data) %in% c("TP", "SC", "TOTAL_INC")]
+full_model.mlr <- lm(PHY~., data=full_model_data)
+summary(full_model.mlr)
+```
+
+### Unusual Observations
+#### High Leverage
+```{r Leverage_full}
+full_model.leverages = lm.influence(full_model.mlr)$hat
+head(full_model.leverages)
+library(faraway)
+halfnorm(full_model.leverages, nlab=6, labs=as.character(1:length(full_model.leverages)), ylab="Leverages")
+```
+```{r Leverage_full_cont}
+n = dim(full_model_data)[1]; # Sample size
+n
+p = length(variable.names(full_model_data)); #13
+p
+full_model.leverages.high = full_model.leverages[full_model.leverages>2*p/n]
+full_model.leverages.high
+```
+We find 35 high-leverage points.
+
+```{r good_bad_rev_full}
+# Calculate the IQR for the dependent variable 
+IQR_y = IQR(full_model_data$PHY)
+
+# Define a range with its lower limit being (Q1 - IQR) and upper limit being (Q3 + IQR) 
+QT1_y = quantile(full_model_data$PHY,0.25)
+QT3_y = quantile(full_model_data$PHY,0.75)
+
+lower_lim_y = QT1_y - IQR_y
+upper_lim_y = QT3_y + IQR_y
+
+vector_lim_y = c(lower_lim_y,upper_lim_y)
+
+# Range for y variable 
+vector_lim_y
+
+# Extract observations with high leverage points from the original data frame 
+full_model.highlev = full_model_data[full_model.leverages>2*p/n,]
+
+# Select only the observations with leverage points outside the range 
+full_model.highlev_lower = full_model.highlev[full_model.highlev$PHY < vector_lim_y[1], ]
+full_model.highlev_upper = full_model.highlev[full_model.highlev$PHY > vector_lim_y[2], ]
+full_model.highlev2 = rbind(full_model.highlev_lower,full_model.highlev_upper)
+full_model.highlev2
+```
+There are 7 bad high-leverage points out of 35 high-leverage points.
+
+#### Outlier
+```{r Outlier_full}
+# Computing Studentized Residuals #
+full_model.resid = rstudent(full_model.mlr); 
+
+# Critical value WITH Bonferroni correction #
+bonferroni_cv = qt(.05/(2*n), n-p-1) 
+bonferroni_cv
+
+# Sorting the residuals in descending order to find outliers (if any) 
+full_model.resid.sorted = sort(abs(full_model.resid), decreasing=TRUE)[1:10]
+print(full_model.resid.sorted)
+
+full_model.outliers = full_model.resid.sorted[abs(full_model.resid.sorted) > abs(bonferroni_cv)]
+print(full_model.outliers)
+```
+There are 5 outliers.
+
+#### Highly Influential
+```{r influential_full}
+full_model.cooks = cooks.distance(full_model.mlr)
+sort(full_model.cooks, decreasing = TRUE)[1:10]
+
+```
+There is one highly influential data point (Cook's distance > 1).
+
+### Constant Variance Assumption
+```{r constant_variance_full}
+plot(full_model.mlr, which=1)
+library(lmtest)
+bptest(full_model.mlr)
+```
+
+We use Breusch-Pagan test to check constant variance assumption. The result is that we reject null hypothesis. We conclude that variance is not constant.
+
+### Normality Assumption
+```{r normality_full}
+plot(full_model.mlr, which=2)
+hist(full_model.mlr$residuals)
+ks.test(full_model.mlr$residuals,"pnorm",mean=mean(full_model.mlr$residuals),sd=sd(full_model.mlr$residuals))
+```
+
+We use Kolmogorov-Smirnov test to check the normality assumption because the number of observation is greater than 50. The result is that we reject null hypothesis. We conclude that the normality assumption is not satisfied.
+
+## Data Tranformation
+### Variable Transformation
+```{r histogram}
+library(Hmisc)
+hist.data.frame(full_model_data)
+```
+
+According to histograms above, we transform the dependent variable and 2 predictors which do not look like bell-shape as follows:
+\[PHYnew = 1/log(PHY)\]
+\[LAnew = log(LA)^2\]
+\[BEDnew = log(BED)^2\]
+
+```{r tranformation on variables}
+transformed_full = full_model_data
+transformed_full$PHYnew = (1/log(transformed_full$PHY))
+transformed_full$LAnew = log(transformed_full$LA)^2
+transformed_full$BEDnew = log(transformed_full$BED)^2
+transformed_full = transformed_full[,-c(1, 4, 5)]
+head(transformed_full)
+```
+
+
+### Refit Model and Model Assumption Check
+
+Our full transformed model is
+\[PHYnew = \beta_{1,0} + \beta_{1,1}LAnew + \beta_{1,2}P18 + \beta_{1,3}P65 + \beta_{1,4}BEDnew + \beta_{1,5}HS + \beta_{1,6}BD + \beta_{1,7}POV + \beta_{1,8}UNEM + \beta_{1,9}CAP\_INC + \beta_{1,10}RE\_NE + \beta_{1,11}RE\_NC + \beta_{1,12}RE\_S\]
+
+```{r fit transformed data}
+# Re-fit the model
+transformed_model.mlr <- lm(PHYnew ~ LAnew + P18 + P65 + BEDnew + HS + BD + POV + UNEM + CAP_INC + RE_NE + RE_NC + RE_S, data=transformed_full)
+summary(transformed_model.mlr)
+# Constant Variance Assumption
+plot(transformed_model.mlr, which=1)
+library(lmtest)
+bptest(transformed_model.mlr)
+# Normality Assumption
+plot(transformed_model.mlr, which=2)
+hist(transformed_model.mlr$residuals)
+ks.test(transformed_model.mlr$residuals,"pnorm",mean=mean(transformed_model.mlr$residuals),sd=sd(transformed_model.mlr$residuals))
+```
+According to both Breusch-Pagan test and Kolmogorov-Smirnov test, the model after the transformation satisfies both constant variance and normality assumption. Thus, we can rely on t-test and F-test for model selection.
+
+## Model Selection
+Firstly, we try to drop all insignificant variables at 10% significant level including `LAnew`, `P18`, `P65`, `POV`, `UNEM`. Then we use Partial F-test ($ANOVA$ function) to test null hypothesis whether reduced model is adequate. The reduced model is denoted as the following: $PHYnew = \beta_{2,0} + \beta_{2,1}BEDnew + \beta_{2,2}HS + \beta_{2,3}BD + \beta_{2,4}CAP\_INC + \beta_{2,5}RE\_NE + \beta_{2,6}RE\_NC + \beta_{2,7}RE\_S$
+
+```{r drop insignificant variables1}
+transformed_model.mlr.red <- lm(PHYnew ~ BEDnew + HS + BD + CAP_INC + RE_NE + RE_NC + RE_S, data=transformed_full)
+summary(transformed_model.mlr.red)
+anova(transformed_model.mlr.red, transformed_model.mlr)
+```
+
+According to p-value of F-test, the reduced model is adequate. It means that `LAnew`, `P18`, `P65`, `POV`, `UNEM` could be dropped. In addition, `HS` is not significant at 5% significant level. We will test whether we can drop `HS` later.
+
+```{r recheck model assumption reduced model 1}
+# Constant Variance Assumption
+plot(transformed_model.mlr.red, which=1)
+bptest(transformed_model.mlr.red)
+# Normality Assumption
+plot(transformed_model.mlr.red, which=2)
+hist(transformed_model.mlr.red$residuals)
+ks.test(transformed_model.mlr.red$residuals,"pnorm",mean=mean(transformed_model.mlr.red$residuals),sd=sd(transformed_model.mlr.red$residuals))
+```
+According to both Breusch-Pagan test and Kolmogorov-Smirnov test, the reduced model satisfies both constant variance and normality assumption. Thus, we can rely on t-test and F-test for model selection.
+
+Now we test whether `HS` can be dropped using $ANOVA$ function. The reduced model is denoted as the following: $PHYnew = \beta_{3,0} + \beta_{3,1}BEDnew + \beta_{3,2}BD + \beta_{3,3}CAP\_INC + \beta_{3,4}RE\_NE + \beta_{3,5}RE\_NC + \beta_{3,6}RE\_S$
+
+```{r drop insignificant variables2}
+transformed_model.mlr.red2 <- lm(PHYnew ~ BEDnew + BD + CAP_INC + RE_NE + RE_NC + RE_S, data=transformed_full)
+summary(transformed_model.mlr.red2)
+anova(transformed_model.mlr.red2, transformed_model.mlr.red)
+```
+According to $ANOVA$ table, `HS` can be dropped.
+
+```{r recheck model assumption reduced model 2}
+# Constant Variance Assumption
+plot(transformed_model.mlr.red2, which=1)
+bptest(transformed_model.mlr.red2)
+# Normality Assumption
+plot(transformed_model.mlr.red2, which=2)
+hist(transformed_model.mlr.red2$residuals)
+ks.test(transformed_model.mlr.red2$residuals,"pnorm",mean=mean(transformed_model.mlr.red2$residuals),sd=sd(transformed_model.mlr.red2$residuals))
+```
+
+Unfortunately, the current reduced model does not satisfy the normality assumption. We will try another transformation after doing unusual observations. 
+
+## Unusual Observations
+### High Leverage
+```{r Leverage_reduced}
+reduced.leverages = lm.influence(transformed_model.mlr.red2)$hat
+head(reduced.leverages)
+library(faraway)
+halfnorm(reduced.leverages, nlab=6, labs=as.character(1:length(reduced.leverages)), ylab="Leverages")
+```
+
+
+```{r Leverage_reduce_cont}
+n = dim(transformed_full)[1]; # Sample size
+n
+p = length(variable.names(transformed_full[,!names(transformed_full) %in% c("LAnew", "P18", "P65", "POV", "UNEM", "HS")])); 
+p
+reduced.leverages.high = reduced.leverages[reduced.leverages>2*p/n]
+reduced.leverages.high
+```
+We find 26 high-leverage points.
+
+```{r good_bad_rev_reduce}
+# Calculate the IQR for the dependent variable 
+IQR_y = IQR(transformed_full$PHYnew)
+
+#Define a range with its lower limit being (Q1 - IQR) and upper limit being (Q3 + IQR) 
+QT1_y = quantile(transformed_full$PHYnew,0.25)
+QT3_y = quantile(transformed_full$PHYnew,0.75)
+
+lower_lim_y = QT1_y - IQR_y
+upper_lim_y = QT3_y + IQR_y
+
+vector_lim_y = c(lower_lim_y,upper_lim_y)
+
+# Range for y variable 
+vector_lim_y
+
+# Extract observations with high leverage points from the original data frame 
+reduced_model.highlev = transformed_full[reduced.leverages>2*p/n,]
+
+# Select only the observations with leverage points outside the range 
+reduced_model.highlev_lower = reduced_model.highlev[reduced_model.highlev$PHYnew < vector_lim_y[1], ]
+reduced_model.highlev_upper = reduced_model.highlev[reduced_model.highlev$PHYnew > vector_lim_y[2], ]
+reduced_model.highlev = rbind(reduced_model.highlev_lower,reduced_model.highlev_upper)
+reduced_model.highlev
+```
+There are 26 high-leverage points but no bad high-leverage point.
+
+
+### Outlier
+```{r Outlier_reduce}
+# Computing Studentized Residuals #
+reduced_model.resid = rstudent(transformed_model.mlr.red2); 
+
+# Critical value WITH Bonferroni correction #
+bonferroni_cv = qt(.05/(2*n), n-p-1) 
+bonferroni_cv
+
+# Sorting the residuals in descending order to find outliers (if any) 
+reduced_model.resid.sorted = sort(abs(reduced_model.resid), decreasing=TRUE)[1:10]
+print(reduced_model.resid.sorted)
+
+reduced_model.outliers = reduced_model.resid.sorted[abs(reduced_model.resid.sorted) > abs(bonferroni_cv)]
+print(reduced_model.outliers)
+```
+There are 2 outliers.
+
+### Highly Influential
+```{r influential_reduced}
+reduced_model.cooks = cooks.distance(transformed_model.mlr.red2)
+sort(reduced_model.cooks, decreasing = TRUE)[1:10]
+
+```
+There is no highly influential point (Cook's distance >1).
+
+## Second Transformation Attempt
+### Finding a Transformation Method
+We run a loop to try to find a better power of $1/log(PHY)$\ to make the reduced model satisfy both constant variance and normality assumption.
+```{r random find power}
+x=c()
+l=c()
+pow=c()
+i = 0.1
+for (k in -100:100){
+  try_transformed_full = full_model_data
+  try_transformed_full$PHY = (1/log(try_transformed_full$PHY))^((2-k*i)/2)
+  try_transformed_full$LA = log(try_transformed_full$LA)^2
+  try_transformed_full$BED = log(try_transformed_full$BED)^2
+  try_transformed_full.mlr <- lm(PHY ~ ., data=try_transformed_full)
+  if (bptest(try_transformed_full.mlr)$p.value > 0.05 & ks.test(try_transformed_full.mlr$residuals,"pnorm",mean=mean(try_transformed_full.mlr$residuals),sd=sd(try_transformed_full.mlr$residuals))$p.value > 0.05){
+    x = append(x,bptest(try_transformed_full.mlr)$p.value)
+    l = append(l,ks.test(try_transformed_full.mlr$residuals,"pnorm",mean=mean(try_transformed_full.mlr$residuals),sd=sd(try_transformed_full.mlr$residuals))$p.value)
+    pow = append(pow,k*i)
+  }
+  
+}
+pow
+median(pow)
+```
+As per the result, we decide to use $0.9$ as a power of $1/log(PHY)$\ since it is the median of the result.
+
+### Re-Transform Data
+We re-transform the dependent variable and keep the original transformation for the 2 predictors as follows:
+\[PHYnew2 = (1/log(PHY))^{0.9}\]
+\[LAnew = log(LA)^2\]
+\[BEDnew = log(BED)^2\]
+
+```{r tranformation on variables2}
+transformed_full2 = full_model_data
+transformed_full2$PHYnew2 = (1/log(transformed_full2$PHY))^0.9
+transformed_full2$LAnew = log(transformed_full2$LA)^2
+transformed_full2$BEDnew = log(transformed_full2$BED)^2
+transformed_full2 = transformed_full2[,-c(1, 4, 5)]
+head(transformed_full2)
+```
+
+### Refit Model and Assumption Check
+
+Our new full transformed model 2 is
+\[PHYnew2 = \beta_{4,0} + \beta_{4,1}LAnew + \beta_{4,2}P18 + \beta_{4,3}P65 + \beta_{4,4}BEDnew + \beta_{4,5}HS + \beta_{4,6}BD + \beta_{4,7}POV + \beta_{4,8}UNEM + \beta_{4,9}CAP\_INC + \beta_{4,10}RE\_NE + \beta_{4,11}RE\_NC + \beta_{4,12}RE\_S\]
+
+```{r fit transformed data2}
+# Re-fit the model
+transformed_model.mlr2 <- lm(PHYnew2 ~ LAnew + P18 + P65 + BEDnew + HS + BD + POV + UNEM + CAP_INC + RE_NE + RE_NC + RE_S, data=transformed_full2)
+summary(transformed_model.mlr2)
+# Constant Variance Assumption
+plot(transformed_model.mlr2, which=1)
+bptest(transformed_model.mlr2)
+# Normality Assumption
+plot(transformed_model.mlr2, which=2)
+hist(transformed_model.mlr2$residuals)
+ks.test(transformed_model.mlr2$residuals,"pnorm",mean=mean(transformed_model.mlr2$residuals),sd=sd(transformed_model.mlr2$residuals))
+```
+
+According to both Breusch-Pagan test and Kolmogorov-Smirnov test, the model after transformation satisfies both constant variance and normality assumption. So that we can rely on t-test and F-test for model selection.
+
+## Model Selection
+Firstly, we try to drop all insignificant variables at 10% significant level including `LAnew`, `P18`, `P65`, `HS`, `POV`, `UNEM`. Then we use Partial F-test ($ANOVA$ function) to test null hypothesis whether reduced model is adequate.
+
+```{r drop insignificant variables3}
+transformed_model.mlr2.red <- lm(PHYnew2 ~ BEDnew + BD + CAP_INC + RE_NE + RE_NC + RE_S, data=transformed_full2)
+summary(transformed_model.mlr2.red)
+anova(transformed_model.mlr2.red, transformed_model.mlr2)
+```
+
+According to p-value of F-test, The reduced model is adequate. It means that `LAnew`, `P18`, `P65`, `HS`, `POV`, `UNEM` can be dropped.
+
+```{r recheck model assumption reduced model 3}
+# Constancy Variance Assumption
+plot(transformed_model.mlr2.red, which=1)
+bptest(transformed_model.mlr2.red)
+# Normality Assumption
+plot(transformed_model.mlr2.red, which=2)
+hist(transformed_model.mlr2.red$residuals)
+ks.test(transformed_model.mlr2.red$residuals,"pnorm",mean=mean(transformed_model.mlr2.red$residuals),sd=sd(transformed_model.mlr2.red$residuals))
+```
+The result shows that both constant variance and normality assumption are satisfied. Thus, we were able to use t-test. Finally, we conclude that no more variables can be dropped since they are all significant at 5% significant level.
+
+Our final model is
+\[PHYnew2 = \beta_{5,0} + \beta_{5,1}BEDnew + \beta_{5,2}BD + \beta_{5,3}CAP\_INC + \beta_{5,4}RE\_NE + \beta_{5,5}RE\_NC + \beta_{5,6}RE\_S\]
+
+```{r final model}
+summary(transformed_model.mlr2.red)
+```
+
+## Re-do Unusual Observations
+### High Leverage
+```{r Leverage_reduced2}
+reduced.leverages2 = lm.influence(transformed_model.mlr2.red)$hat
+head(reduced.leverages2)
+library(faraway)
+halfnorm(reduced.leverages2, nlab=6, labs=as.character(1:length(reduced.leverages2)), ylab="Leverages")
+```
+
+
+```{r Leverage_reduce_cont2}
+n2 = dim(transformed_full2)[1]; # Sample size
+n2
+p2 = length(variable.names(transformed_full2[,!names(transformed_full2) %in% c("LAnew", "P18", "P65", "POV", "UNEM", "HS")])); 
+p2
+reduced.leverages.high2 = reduced.leverages2[reduced.leverages2>2*p2/n2]
+reduced.leverages.high2
+```
+We find 26 high-leverage points.
+
+```{r good_bad_rev_reduce2}
+# Calculate the IQR for the dependent variable 
+IQR_y2 = IQR(transformed_full2$PHYnew2)
+
+# Define a range with its lower limit being (Q1 - IQR) and upper limit being (Q3 + IQR) 
+QT1_y2 = quantile(transformed_full2$PHYnew2,0.25)
+QT3_y2 = quantile(transformed_full2$PHYnew2,0.75)
+
+lower_lim_y2 = QT1_y2 - IQR_y2
+upper_lim_y2 = QT3_y2 + IQR_y2
+
+vector_lim_y2 = c(lower_lim_y2,upper_lim_y2)
+
+# Range for y variable 
+vector_lim_y2
+
+# Extract observations with high leverage points from the original data frame 
+reduced_model.highlev2 = transformed_full2[reduced.leverages2>2*p/n,]
+
+# Select only the observations with leverage points outside the range 
+reduced_model.highlev_lower2 = reduced_model.highlev2[reduced_model.highlev2$PHYnew2 < vector_lim_y2[1], ]
+reduced_model.highlev_upper2 = reduced_model.highlev2[reduced_model.highlev2$PHYnew2 > vector_lim_y2[2], ]
+reduced_model.highlev2 = rbind(reduced_model.highlev_lower2,reduced_model.highlev_upper2)
+reduced_model.highlev2
+```
+
+There are 26 high-leverage points but no bad high leverage point.
+
+
+### Outlier
+```{r Outlier_reduce2}
+# Computing Studentized Residuals #
+reduced_model.resid2 = rstudent(transformed_model.mlr2.red); 
+
+# Critical value WITH Bonferroni correction #
+bonferroni_cv2 = qt(.05/(2*n2), n2-p2-1) 
+bonferroni_cv2
+
+# Sorting the residuals in descending order to find outliers (if any) 
+reduced_model.resid.sorted2 = sort(abs(reduced_model.resid2), decreasing=TRUE)[1:10]
+print(reduced_model.resid.sorted2)
+
+reduced_model.outliers2 = reduced_model.resid.sorted2[abs(reduced_model.resid.sorted2) > abs(bonferroni_cv2)]
+print(reduced_model.outliers2)
+```
+
+There are 2 outliers (Studentized Residual > ABS(Bonferroni critical value)).
+
+### Highly Influential
+```{r influential_reduced2}
+reduced_model.cooks = cooks.distance(transformed_model.mlr2.red)
+sort(reduced_model.cooks, decreasing = TRUE)[1:10]
+
+```
+There is no highly influential point because all cook's distance are lower than 1.
