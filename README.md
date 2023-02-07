@@ -14,7 +14,7 @@ Currently studying in MS of Statistics at the University of Illinois at Urbana-C
 ## Skills
 Python, R, Matlab
 
-## Hobbit
+## Hobby
 I love playing table tennis and volleyball.
 
 ## Contact Information
