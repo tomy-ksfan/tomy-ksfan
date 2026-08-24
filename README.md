@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://www.linkedin.com/in/tomyksfan/"><img src="https://img.shields.io/badge/LinkedIn-0A66C2?style=flat-square&logo=linkedin&logoColor=white" alt="LinkedIn"></a>
-  <a href="mailto:fan.1317@buckeyemail.osu.edu"><img src="https://img.shields.io/badge/Email-EA4335?style=flat-square&logo=gmail&logoColor=white" alt="Email"></a>
+  <a href="mailto:fan.1317@osu.edu"><img src="https://img.shields.io/badge/Email-EA4335?style=flat-square&logo=gmail&logoColor=white" alt="Email"></a>
   <a href="https://tomy-ksfan.github.io/"><img src="https://img.shields.io/badge/Website-222222?style=flat-square&logo=githubpages&logoColor=white" alt="Personal website"></a>
 </p>
 
@@ -47,5 +47,5 @@ When I'm away from data and models, I enjoy playing table tennis 🏓 and volley
 
 ## Contact
 
-- Email: [fan.1317@buckeyemail.osu.edu](mailto:fan.1317@osu.edu)
+- Email: [fan.1317@osu.edu](mailto:fan.1317@osu.edu)
 - LinkedIn: [linkedin.com/in/tomyksfan](https://www.linkedin.com/in/tomyksfan/)
