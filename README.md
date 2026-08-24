@@ -47,5 +47,5 @@ When I'm away from data and models, I enjoy playing table tennis 🏓 and volley
 
 ## Contact
 
-- Email: [fan.1317@buckeyemail.osu.edu](mailto:fan.1317@buckeyemail.osu.edu)
+- Email: [fan.1317@buckeyemail.osu.edu](mailto:fan.1317@osu.edu)
 - LinkedIn: [linkedin.com/in/tomyksfan](https://www.linkedin.com/in/tomyksfan/)
